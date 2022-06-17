@@ -38,6 +38,7 @@ fn main() {
                 "EGL_KHR_platform_wayland",
                 "EGL_KHR_platform_x11",
                 "EGL_KHR_swap_buffers_with_damage",
+                "EGL_EXT_pixel_format_float",
                 "EGL_MESA_platform_gbm",
             ],
         );

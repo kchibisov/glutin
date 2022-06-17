@@ -12,8 +12,8 @@ publish = false
 
 [dependencies]
 glutin = { path = "../glutin" }
-takeable-option = "0.4"
-image = "0.24"
+winit = "0.27.2"
+raw-window-handle = "0.5.0"
 
 [build-dependencies]
 gl_generator = "0.14"
