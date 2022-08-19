@@ -1,11 +1,8 @@
-use std::collections::HashSet;
-use std::sync::Arc;
-
 use raw_window_handle::RawDisplayHandle;
 
 use crate::config::ConfigTemplate;
 use crate::display::{AsRawDisplay, RawDisplay};
-use crate::error::Result;
+use crate::error::{ErrorKind, Result};
 use crate::prelude::*;
 use crate::private::Sealed;
 use crate::surface::{PbufferSurface, PixmapSurface, SurfaceAttributes, WindowSurface};
@@ -15,23 +12,15 @@ use super::context::NotCurrentContext;
 use super::surface::Surface;
 
 #[derive(Clone)]
-pub struct Display {
-    pub(crate) inner: Arc<DisplayInner>,
-}
-
-pub(crate) struct DisplayInner {
-    /// Client WGL extensions.
-    pub(crate) client_extensions: HashSet<&'static str>,
-}
+pub struct Display;
 
 impl Display {
-    /// Create WGL display.
-    ///
-    /// # Safety
-    ///
-    /// The `display` must point to the valid Windows display.
-    pub unsafe fn from_raw(display: RawDisplayHandle) -> Result<Self> {
-        todo!()
+    /// Create CGL display.
+    pub fn from_raw(display: RawDisplayHandle) -> Result<Self> {
+        match display {
+            RawDisplayHandle::AppKit(..) => Ok(Display),
+            _ => Err(ErrorKind::NotSupported.into()),
+        }
     }
 }
 
@@ -86,7 +75,6 @@ impl GlDisplay for Display {
 
 impl AsRawDisplay for Display {
     fn raw_display(&self) -> RawDisplay {
-        // RawDisplay::Wgl(self.inner.raw.cast())
-        todo!()
+        RawDisplay::Cgl
     }
 }

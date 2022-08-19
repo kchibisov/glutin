@@ -5,12 +5,14 @@ use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
+#[cfg(x11_platform)]
 use winit::platform::unix::{self, WindowBuilderExtUnix};
 use winit::window::WindowBuilder;
 
 use glutin::config::{ConfigSurfaceTypes, ConfigTemplateBuilder};
 use glutin::context::ContextAttributesBuilder;
 use glutin::display::{Display, DisplayApiPreference, DisplayPicker};
+#[cfg(x11_platform)]
 use glutin::platform::x11::X11GlConfigExt;
 use glutin::prelude::*;
 use glutin::surface::{SurfaceAttributesBuilder, WindowSurface};
@@ -24,9 +26,12 @@ fn main() {
     let event_loop = EventLoop::new();
     let raw_display = event_loop.raw_display_handle();
 
+    #[cfg(all(egl_backend, glx_backend))]
     let picker = DisplayPicker::new()
         .with_api_preference(DisplayApiPreference::GlxThenEgl)
         .with_glx_error_registrator(Box::new(unix::register_xlib_error_hook));
+    #[cfg(not(all(egl_backend, glx_backend)))]
+    let picker = DisplayPicker::new();
 
     // Create connection to underlying OpenGL client Api.
     let gl_display = unsafe { Display::from_raw(raw_display, picker).unwrap() };
@@ -48,6 +53,7 @@ fn main() {
     let mut window = WindowBuilder::new().with_transparent(true);
 
     // On X11 we must pass the visual we've got from the config.
+    #[cfg(x11_platform)]
     if let Some(x11_visual) = gl_config.x11_visual() {
         window = window.with_x11_visual(x11_visual.into_raw());
     }
@@ -82,10 +88,10 @@ fn main() {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::Resized(size) => {
                     gl_surface.resize(
+                        &gl_context,
                         NonZeroU32::new(size.width).unwrap(),
                         NonZeroU32::new(size.height).unwrap(),
                     );
-                    gl_context.update_after_resize();
                 }
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
@@ -99,7 +105,7 @@ fn main() {
                     window.request_redraw();
                 }
 
-                let _ = gl_surface.swap_buffers();
+                let _ = gl_surface.swap_buffers(&gl_context);
             }
             _ => (),
         }

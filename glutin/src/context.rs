@@ -1,3 +1,4 @@
+#![allow(unreachable_patterns)]
 use std::ffi::{self, CStr};
 
 use crate::dispatch_gl;
@@ -164,8 +165,6 @@ pub trait PossiblyCurrentGlContext: Sealed {
 
     fn set_swap_interval(&self, interval: u16);
 
-    fn update_after_resize(&self);
-
     fn get_proc_address(&self, addr: &CStr) -> *const ffi::c_void;
 }
 
@@ -227,10 +226,6 @@ impl PossiblyCurrentGlContext for PossiblyCurrentContext {
 
     fn set_swap_interval(&self, interval: u16) {
         dispatch_gl!(self; Self(context) => context.set_swap_interval(interval))
-    }
-
-    fn update_after_resize(&self) {
-        dispatch_gl!(self; Self(context) => context.update_after_resize())
     }
 
     fn get_proc_address(&self, addr: &CStr) -> *const ffi::c_void {
@@ -388,7 +383,7 @@ pub enum RawContext {
     #[cfg(wgl_backend)]
     Wgl(*const ffi::c_void),
 
-    /// TODO.
+    /// Pointer to NSOpenGLContext.
     #[cfg(cgl_backend)]
     Cgl(*const ffi::c_void),
 }

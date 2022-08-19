@@ -1,5 +1,8 @@
 //! A cross platform OpenGL platform api library.
 
+#[cfg(all(not(egl_backend), not(glx_backend), not(wgl_backend), not(cgl_backend)))]
+compile_error!("Please select at least one api backend");
+
 pub mod api;
 pub mod config;
 pub mod context;
@@ -9,10 +12,13 @@ pub mod platform;
 pub mod prelude;
 pub mod surface;
 
+#[cfg(any(egl_backend, glx_backend, wgl_backend))]
 mod lib_loading;
 
-#[cfg(all(not(egl_backend), not(glx_backend), not(wgl_backend), not(cgl_backend)))]
-compile_error!("Please select at least one api backend");
+
+#[cfg(cgl_backend)]
+#[macro_use]
+extern crate objc;
 
 pub(crate) mod gl_dipsatch {
     /// `dispatch_gl!(match expr; Enum(foo) => foo.something())`

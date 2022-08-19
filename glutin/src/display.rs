@@ -1,6 +1,5 @@
 //! The GL platform display creation and picking.
-
-use std::ffi;
+#![allow(unreachable_patterns)]
 
 use raw_window_handle::RawDisplayHandle;
 
@@ -392,19 +391,18 @@ pub trait GetGlDisplay: Sealed {
 pub enum RawDisplay {
     /// Raw EGL display.
     #[cfg(egl_backend)]
-    Egl(*const ffi::c_void),
+    Egl(*const std::ffi::c_void),
 
     /// Raw GLX display.
     #[cfg(glx_backend)]
-    Glx(*const ffi::c_void),
+    Glx(*const std::ffi::c_void),
 
     /// TODO.
     #[cfg(wgl_backend)]
-    Wgl(*const ffi::c_void),
+    Wgl(*const std::ffi::c_void),
 
-    /// TODO
     #[cfg(cgl_backend)]
-    Cgl(*const ffi::c_void),
+    Cgl,
 }
 
 pub trait AsRawDisplay {
