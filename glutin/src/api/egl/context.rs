@@ -168,10 +168,6 @@ impl PossiblyCurrentGlContext for PossiblyCurrentContext {
         Ok(NotCurrentContext::new(self.inner))
     }
 
-    fn update_after_resize(&self) {
-        self.inner.update_after_resize()
-    }
-
     fn is_current(&self) -> bool {
         unsafe { self.inner.display.inner.egl.GetCurrentContext() == self.inner.raw }
     }
@@ -289,10 +285,6 @@ impl ContextInner {
                 Ok(())
             }
         }
-    }
-
-    fn update_after_resize(&self) {
-        // This line is intentionally left blank.
     }
 }
 

@@ -1,4 +1,5 @@
 //! GL config picking and creating utils.
+#![allow(unreachable_patterns)]
 
 use std::ffi;
 use std::num::NonZeroU32;
@@ -63,7 +64,7 @@ bitflags! {
 pub enum ColorBufferType {
     /// The backing buffer is using RGB format.
     Rgb { r_size: u8, g_size: u8, b_size: u8 },
-
+    
     /// The backing buffer is using Luminance.
     Luminance(u8),
 }

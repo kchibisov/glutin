@@ -19,6 +19,7 @@ use crate::surface::{
 };
 
 use super::config::Config;
+use super::context::PossiblyCurrentContext;
 use super::display::Display;
 
 const ATTR_SIZE_HINT: usize = 8;
@@ -183,6 +184,7 @@ pub struct Surface<T: SurfaceTypeTrait> {
 
 impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
     type SurfaceType = T;
+    type Context = PossiblyCurrentContext;
 
     fn buffer_age(&self) -> u32 {
         self.raw_attribute(egl::BUFFER_AGE_EXT as EGLint) as u32
@@ -200,7 +202,7 @@ impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
         self.raw_attribute(egl::RENDER_BUFFER as EGLint) != egl::SINGLE_BUFFER as i32
     }
 
-    fn swap_buffers(&self) -> Result<()> {
+    fn swap_buffers(&self, _context: &Self::Context) -> Result<()> {
         unsafe {
             if self.display.inner.egl.SwapBuffers(self.display.inner.raw, self.raw) == egl::FALSE {
                 super::check_error()
@@ -210,19 +212,19 @@ impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
         }
     }
 
-    fn is_current(&self) -> bool {
-        self.is_current_draw() && self.is_current_read()
+    fn is_current(&self, context: &Self::Context) -> bool {
+        self.is_current_draw(context) && self.is_current_read(context)
     }
 
-    fn is_current_draw(&self) -> bool {
+    fn is_current_draw(&self, _context: &Self::Context) -> bool {
         unsafe { self.display.inner.egl.GetCurrentSurface(egl::DRAW as EGLint) == self.raw }
     }
 
-    fn is_current_read(&self) -> bool {
+    fn is_current_read(&self, _context: &Self::Context) -> bool {
         unsafe { self.display.inner.egl.GetCurrentSurface(egl::READ as EGLint) == self.raw }
     }
 
-    fn resize(&self, width: NonZeroU32, height: NonZeroU32) {
+    fn resize(&self, _context: &Self::Context, width: NonZeroU32, height: NonZeroU32) {
         self.native_window.as_ref().unwrap().resize(width, height)
     }
 }
@@ -273,7 +275,11 @@ impl<T: SurfaceTypeTrait> Surface<T> {
     ///
     /// This Api doesn't do any parital rendering, it basically provides the hints for the system
     /// compositor.
-    pub fn swap_buffers_with_damage(&self, rects: &[DamageRect]) -> Result<()> {
+    pub fn swap_buffers_with_damage(
+        &self,
+        _context: &PossiblyCurrentContext,
+        rects: &[DamageRect],
+    ) -> Result<()> {
         unsafe {
             if self.display.inner.egl.SwapBuffersWithDamageKHR(
                 self.display.inner.raw,

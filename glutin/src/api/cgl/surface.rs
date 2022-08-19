@@ -1,36 +1,45 @@
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
-use std::os::raw::{c_int, c_uint};
 
+use cocoa::base::{id, nil};
 use raw_window_handle::RawWindowHandle;
 
 use crate::config::GetGlConfig;
 use crate::display::GetGlDisplay;
-use crate::error::Result;
+use crate::error::{Error, ErrorKind, Result};
 use crate::private::Sealed;
 use crate::surface::{
     AsRawSurface, GlSurface, PbufferSurface, PixmapSurface, RawSurface, SurfaceAttributes,
-    SurfaceType, SurfaceTypeTrait, WindowSurface,
+    SurfaceTypeTrait, WindowSurface,
 };
 
 use super::config::Config;
 use super::display::Display;
+use super::context::PossiblyCurrentContext;
 
 impl Display {
     pub(crate) unsafe fn create_pixmap_surface(
         &self,
-        config: &Config,
-        surface_attributes: &SurfaceAttributes<PixmapSurface>,
+        _config: &Config,
+        _surface_attributes: &SurfaceAttributes<PixmapSurface>,
     ) -> Result<Surface<PixmapSurface>> {
-        todo!()
+        Err(Error::new(
+            None,
+            Some("pixmaps are not supported on CGL".to_owned()),
+            ErrorKind::NotSupported,
+        ))
     }
 
     pub(crate) fn create_pbuffer_surface(
         &self,
-        config: &Config,
-        surface_attributes: &SurfaceAttributes<PbufferSurface>,
+        _config: &Config,
+        _surface_attributes: &SurfaceAttributes<PbufferSurface>,
     ) -> Result<Surface<PbufferSurface>> {
-        todo!()
+        Err(Error::new(
+            None,
+            Some("pbuffers are not supported on CGL".to_owned()),
+            ErrorKind::NotSupported,
+        ))
     }
 
     pub(crate) unsafe fn create_window_surface(
@@ -38,13 +47,23 @@ impl Display {
         config: &Config,
         surface_attributes: &SurfaceAttributes<WindowSurface>,
     ) -> Result<Surface<WindowSurface>> {
-        todo!()
+        let native_window = match surface_attributes.raw_window_handle.unwrap() {
+            RawWindowHandle::AppKit(window) => window,
+            _ => return Err(ErrorKind::NotSupported.into()),
+        };
+
+        let ns_view: id = native_window.ns_view.cast();
+        let _: () = msg_send![ns_view, retain];
+        let surface =
+            Surface { display: self.clone(), config: config.clone(), ns_view, _ty: PhantomData };
+        Ok(surface)
     }
 }
 
 pub struct Surface<T: SurfaceTypeTrait> {
     display: Display,
     config: Config,
+    pub(crate) ns_view: id,
     _ty: PhantomData<T>,
 }
 
@@ -52,47 +71,48 @@ impl<T: SurfaceTypeTrait> Sealed for Surface<T> {}
 
 impl<T: SurfaceTypeTrait> AsRawSurface for Surface<T> {
     fn raw_surface(&self) -> RawSurface {
-        todo!()
+        RawSurface::Cgl(self.ns_view.cast())
     }
 }
 
 impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
     type SurfaceType = T;
+    type Context = PossiblyCurrentContext;
 
     fn buffer_age(&self) -> u32 {
-        todo!()
+        0
     }
 
     fn width(&self) -> Option<u32> {
-        todo!()
+        None
     }
 
     fn height(&self) -> Option<u32> {
-        todo!()
+        None
     }
 
     fn is_single_buffered(&self) -> bool {
-        todo!()
+        false
     }
 
-    fn swap_buffers(&self) -> Result<()> {
-        todo!()
+    fn swap_buffers(&self, context: &Self::Context) -> Result<()> {
+        context.inner.flush_buffer()
     }
 
-    fn is_current(&self) -> bool {
-        todo!()
+    fn is_current(&self, context: &Self::Context) -> bool {
+        self.ns_view == context.inner.current_view()
     }
 
-    fn is_current_draw(&self) -> bool {
-        todo!()
+    fn is_current_draw(&self, context: &Self::Context) -> bool {
+        self.is_current(context)
     }
 
-    fn is_current_read(&self) -> bool {
-        todo!()
+    fn is_current_read(&self, context: &Self::Context) -> bool {
+        self.is_current(context)
     }
 
-    fn resize(&self, _width: NonZeroU32, _height: NonZeroU32) {
-        // This isn't supported with GLXDrawable.
+    fn resize(&self, context: &Self::Context, _width: NonZeroU32, _height: NonZeroU32) {
+        context.inner.update();
     }
 }
 
@@ -110,14 +130,12 @@ impl<T: SurfaceTypeTrait> GetGlDisplay for Surface<T> {
     }
 }
 
-impl<T: SurfaceTypeTrait> Surface<T> {
-    fn raw_attribute(&self, attr: c_int) -> c_uint {
-        todo!()
-    }
-}
-
 impl<T: SurfaceTypeTrait> Drop for Surface<T> {
     fn drop(&mut self) {
-        todo!()
+        unsafe {
+            if self.ns_view != nil {
+                let _: () = msg_send![self.ns_view, retain];
+            }
+        }
     }
 }

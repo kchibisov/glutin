@@ -1,4 +1,5 @@
 //! A cross platform GL surface representation.
+#![allow(unreachable_patterns)]
 
 use std::ffi;
 use std::marker::PhantomData;
@@ -6,6 +7,7 @@ use std::num::NonZeroU32;
 
 use raw_window_handle::RawWindowHandle;
 
+use crate::context::{PossiblyCurrentContext, PossiblyCurrentGlContext};
 use crate::dispatch_gl;
 use crate::display::{Display, GetGlDisplay};
 use crate::error::Result;
@@ -166,6 +168,7 @@ impl SurfaceAttributesBuilder<PbufferSurface> {
 
 pub trait GlSurface<T: SurfaceTypeTrait>: Sealed {
     type SurfaceType: SurfaceTypeTrait;
+    type Context: PossiblyCurrentGlContext;
 
     /// The age of the back buffer of that surface. The `0` indicates that the buffer is either
     /// a new one or we failed to get the information about its age. In both cases you must redraw
@@ -182,16 +185,16 @@ pub trait GlSurface<T: SurfaceTypeTrait>: Sealed {
     fn is_single_buffered(&self) -> bool;
 
     /// Swaps the underlying back buffers when the surfate is not single buffered.
-    fn swap_buffers(&self) -> Result<()>;
+    fn swap_buffers(&self, context: &Self::Context) -> Result<()>;
 
     /// Check whether the surface is current on to the curren thread.
-    fn is_current(&self) -> bool;
+    fn is_current(&self, context: &Self::Context) -> bool;
 
     /// Check wherher the surface is current draw surface to the current thread.
-    fn is_current_draw(&self) -> bool;
+    fn is_current_draw(&self, context: &Self::Context) -> bool;
 
     /// Check wherher the surface is current read surface to the current thread.
-    fn is_current_read(&self) -> bool;
+    fn is_current_read(&self, context: &Self::Context) -> bool;
 
     /// Resize the surface to the new size.
     ///
@@ -201,7 +204,7 @@ pub trait GlSurface<T: SurfaceTypeTrait>: Sealed {
     ///
     /// **Wayland:** - resizes the surface.
     /// **Other:** - no op.
-    fn resize(&self, width: NonZeroU32, height: NonZeroU32)
+    fn resize(&self, context: &Self::Context, width: NonZeroU32, height: NonZeroU32)
     where
         Self::SurfaceType: ResizeableSurface;
 }
@@ -222,6 +225,7 @@ pub enum Surface<T: SurfaceTypeTrait> {
 
 impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
     type SurfaceType = T;
+    type Context = PossiblyCurrentContext;
 
     fn buffer_age(&self) -> u32 {
         dispatch_gl!(self; Self(surface) => surface.buffer_age())
@@ -239,27 +243,117 @@ impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
         dispatch_gl!(self; Self(surface) => surface.is_single_buffered())
     }
 
-    fn swap_buffers(&self) -> Result<()> {
-        dispatch_gl!(self; Self(surface) => surface.swap_buffers())
+    fn swap_buffers(&self, context: &Self::Context) -> Result<()> {
+        match (self, context) {
+            #[cfg(egl_backend)]
+            (Self::Egl(surface), PossiblyCurrentContext::Egl(context)) => {
+                surface.swap_buffers(context)
+            }
+            #[cfg(glx_backend)]
+            (Self::Glx(surface), PossiblyCurrentContext::Glx(context)) => {
+                surface.swap_buffers(context)
+            }
+            #[cfg(cgl_backend)]
+            (Self::Cgl(surface), PossiblyCurrentContext::Cgl(context)) => {
+                surface.swap_buffers(context)
+            }
+            #[cfg(wgl_backend)]
+            (Self::Wgl(surface), PossiblyCurrentContext::Wgl(context)) => {
+                surface.swap_buffers(context)
+            }
+            _ => unreachable!(),
+        }
     }
 
-    fn is_current(&self) -> bool {
-        dispatch_gl!(self; Self(surface) => surface.is_current())
+    fn is_current(&self, context: &Self::Context) -> bool {
+        match (self, context) {
+            #[cfg(egl_backend)]
+            (Self::Egl(surface), PossiblyCurrentContext::Egl(context)) => {
+                surface.is_current(context)
+            }
+            #[cfg(glx_backend)]
+            (Self::Glx(surface), PossiblyCurrentContext::Glx(context)) => {
+                surface.is_current(context)
+            }
+            #[cfg(cgl_backend)]
+            (Self::Cgl(surface), PossiblyCurrentContext::Cgl(context)) => {
+                surface.is_current(context)
+            }
+            #[cfg(wgl_backend)]
+            (Self::Wgl(surface), PossiblyCurrentContext::Wgl(context)) => {
+                surface.is_current(context)
+            }
+            _ => unreachable!(),
+        }
     }
 
-    fn is_current_draw(&self) -> bool {
-        dispatch_gl!(self; Self(surface) => surface.is_current_draw())
+    fn is_current_draw(&self, context: &Self::Context) -> bool {
+        match (self, context) {
+            #[cfg(egl_backend)]
+            (Self::Egl(surface), PossiblyCurrentContext::Egl(context)) => {
+                surface.is_current_draw(context)
+            }
+            #[cfg(glx_backend)]
+            (Self::Glx(surface), PossiblyCurrentContext::Glx(context)) => {
+                surface.is_current_draw(context)
+            }
+            #[cfg(cgl_backend)]
+            (Self::Cgl(surface), PossiblyCurrentContext::Cgl(context)) => {
+                surface.is_current_draw(context)
+            }
+            #[cfg(wgl_backend)]
+            (Self::Wgl(surface), PossiblyCurrentContext::Wgl(context)) => {
+                surface.is_current_draw(context)
+            }
+            _ => unreachable!(),
+        }
     }
 
-    fn is_current_read(&self) -> bool {
-        dispatch_gl!(self; Self(surface) => surface.is_current_read())
+    fn is_current_read(&self, context: &Self::Context) -> bool {
+        match (self, context) {
+            #[cfg(egl_backend)]
+            (Self::Egl(surface), PossiblyCurrentContext::Egl(context)) => {
+                surface.is_current_read(context)
+            }
+            #[cfg(glx_backend)]
+            (Self::Glx(surface), PossiblyCurrentContext::Glx(context)) => {
+                surface.is_current_read(context)
+            }
+            #[cfg(cgl_backend)]
+            (Self::Cgl(surface), PossiblyCurrentContext::Cgl(context)) => {
+                surface.is_current_read(context)
+            }
+            #[cfg(wgl_backend)]
+            (Self::Wgl(surface), PossiblyCurrentContext::Wgl(context)) => {
+                surface.is_current_read(context)
+            }
+            _ => unreachable!(),
+        }
     }
 
-    fn resize(&self, width: NonZeroU32, height: NonZeroU32)
+    fn resize(&self, context: &Self::Context, width: NonZeroU32, height: NonZeroU32)
     where
         Self::SurfaceType: ResizeableSurface,
     {
-        dispatch_gl!(self; Self(surface) => surface.resize(width, height))
+        match (self, context) {
+            #[cfg(egl_backend)]
+            (Self::Egl(surface), PossiblyCurrentContext::Egl(context)) => {
+                surface.resize(context, width, height)
+            }
+            #[cfg(glx_backend)]
+            (Self::Glx(surface), PossiblyCurrentContext::Glx(context)) => {
+                surface.resize(context, width, height)
+            }
+            #[cfg(cgl_backend)]
+            (Self::Cgl(surface), PossiblyCurrentContext::Cgl(context)) => {
+                surface.resize(context, width, height)
+            }
+            #[cfg(wgl_backend)]
+            (Self::Wgl(surface), PossiblyCurrentContext::Wgl(context)) => {
+                surface.resize(context, width, height)
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -311,7 +405,7 @@ pub enum RawSurface {
     #[cfg(wgl_backend)]
     Wgl(*const ffi::c_void),
 
-    /// TODO
+    /// Pointer to `NSView`.
     #[cfg(cgl_backend)]
     Cgl(*const ffi::c_void),
 }

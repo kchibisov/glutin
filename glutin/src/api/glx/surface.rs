@@ -18,6 +18,7 @@ use crate::surface::{
 };
 
 use super::config::Config;
+use super::context::PossiblyCurrentContext;
 use super::display::Display;
 
 const ATTR_SIZE_HINT: usize = 8;
@@ -132,6 +133,7 @@ impl<T: SurfaceTypeTrait> AsRawSurface for Surface<T> {
 
 impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
     type SurfaceType = T;
+    type Context = PossiblyCurrentContext;
 
     fn buffer_age(&self) -> u32 {
         self.raw_attribute(glx_extra::BACK_BUFFER_AGE_EXT as c_int) as u32
@@ -150,26 +152,26 @@ impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
         false
     }
 
-    fn swap_buffers(&self) -> Result<()> {
+    fn swap_buffers(&self, _context: &Self::Context) -> Result<()> {
         unsafe {
             self.display.inner.glx.SwapBuffers(self.display.inner.raw.cast(), self.raw);
             super::last_glx_error(self.display.inner.raw)
         }
     }
 
-    fn is_current(&self) -> bool {
-        self.is_current_draw() && self.is_current_read()
+    fn is_current(&self, context: &Self::Context) -> bool {
+        self.is_current_draw(context) && self.is_current_read(context)
     }
 
-    fn is_current_draw(&self) -> bool {
+    fn is_current_draw(&self, _context: &Self::Context) -> bool {
         unsafe { self.display.inner.glx.GetCurrentDrawable() == self.raw }
     }
 
-    fn is_current_read(&self) -> bool {
+    fn is_current_read(&self, _context: &Self::Context) -> bool {
         unsafe { self.display.inner.glx.GetCurrentReadDrawable() == self.raw }
     }
 
-    fn resize(&self, _width: NonZeroU32, _height: NonZeroU32) {
+    fn resize(&self, _context: &Self::Context, _width: NonZeroU32, _height: NonZeroU32) {
         // This isn't supported with GLXDrawable.
     }
 }
