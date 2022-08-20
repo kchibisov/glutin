@@ -134,8 +134,8 @@ impl GlxExtra {
 }
 
 impl SymLoading for glx::Glx {
-    fn load_with(lib: &Library) -> Self {
-        Self::load_with(|sym| unsafe {
+    unsafe fn load_with(lib: &Library) -> Self {
+        Self::load_with(|sym| {
             lib.get(CString::new(sym.as_bytes()).unwrap().as_bytes_with_nul())
                 .map(|sym| *sym)
                 .unwrap_or(std::ptr::null_mut())

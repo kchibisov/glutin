@@ -5,6 +5,9 @@ use std::sync::Arc;
 
 use libloading::Library;
 
+#[cfg(windows)]
+use libloading::os::windows::{Library as WinLibrary, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS};
+
 #[derive(Clone)]
 pub struct SymWrapper<T> {
     sym: T,
@@ -12,14 +15,22 @@ pub struct SymWrapper<T> {
 }
 
 pub trait SymLoading {
-    fn load_with(lib: &Library) -> Self;
+    /// The library must be unsured to live long enough.
+    unsafe fn load_with(lib: &Library) -> Self;
 }
 
 impl<T: SymLoading> SymWrapper<T> {
-    pub fn new(libs: &[&str]) -> Result<Self, ()> {
+    pub fn new(lib_paths: &[&str]) -> Result<Self, ()> {
         unsafe {
-            for lib in libs {
-                if let Ok(lib) = Library::new(lib) {
+            for path in lib_paths {
+                #[cfg(windows)]
+                let lib = WinLibrary::load_with_flags(path, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)
+                    .map(From::from);
+
+                #[cfg(not(windows))]
+                let lib = Library::new(path);
+
+                if let Ok(lib) = lib {
                     return Ok(SymWrapper { sym: T::load_with(&lib), _lib: Arc::new(lib) });
                 }
             }

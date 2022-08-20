@@ -1,6 +1,8 @@
 #![allow(unreachable_patterns)]
 use std::ffi::{self, CStr};
 
+use raw_window_handle::RawWindowHandle;
+
 use crate::dispatch_gl;
 use crate::display::{Display, GetGlDisplay};
 use crate::error::Result;
@@ -114,6 +116,8 @@ pub struct ContextAttributes {
     pub(crate) profile: Option<GlProfile>,
 
     pub(crate) shared_context: Option<RawContext>,
+
+    pub(crate) raw_window_handle: Option<RawWindowHandle>,
 }
 
 #[derive(Default)]
@@ -152,6 +156,11 @@ impl ContextAttributesBuilder {
     }
 
     pub fn build(self) -> ContextAttributes {
+        self.attributes
+    }
+
+    pub fn build_windowed(mut self, raw_window_handle: RawWindowHandle) -> ContextAttributes {
+        self.attributes.raw_window_handle = Some(raw_window_handle);
         self.attributes
     }
 }

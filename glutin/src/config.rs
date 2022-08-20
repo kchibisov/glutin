@@ -5,6 +5,7 @@ use std::ffi;
 use std::num::NonZeroU32;
 
 use bitflags::bitflags;
+use raw_window_handle::RawWindowHandle;
 
 use crate::dispatch_gl;
 use crate::display::{Display, GetGlDisplay};
@@ -64,7 +65,7 @@ bitflags! {
 pub enum ColorBufferType {
     /// The backing buffer is using RGB format.
     Rgb { r_size: u8, g_size: u8, b_size: u8 },
-    
+
     /// The backing buffer is using Luminance.
     Luminance(u8),
 }
@@ -116,6 +117,9 @@ pub struct ConfigTemplate {
 
     /// The maximum height of the pbuffer.
     pub(crate) max_pbuffer_height: Option<u32>,
+
+    /// The native window config should support rendering into.
+    pub(crate) native_window: Option<RawWindowHandle>,
 }
 
 impl Default for ConfigTemplate {
@@ -125,9 +129,9 @@ impl Default for ConfigTemplate {
 
             alpha_size: 8,
 
-            depth_size: 0,
+            depth_size: 24,
 
-            stencil_size: 0,
+            stencil_size: 8,
 
             sample_buffers: 0,
 
@@ -147,6 +151,8 @@ impl Default for ConfigTemplate {
 
             max_pbuffer_width: None,
             max_pbuffer_height: None,
+
+            native_window: None,
 
             api: Api::OPENGL,
         }
@@ -273,6 +279,14 @@ impl ConfigTemplateBuilder {
     pub fn with_pbuffer_sizes(mut self, width: NonZeroU32, height: NonZeroU32) -> Self {
         self.template.max_pbuffer_width = Some(width.into());
         self.template.max_pbuffer_height = Some(height.into());
+        self
+    }
+
+    /// Request config that can render to a particular native window.
+    ///
+    /// TODO platform docs.
+    pub fn compatible_with_native_window(mut self, native_window: RawWindowHandle) -> Self {
+        self.template.native_window = Some(native_window);
         self
     }
 
@@ -418,9 +432,9 @@ pub enum RawConfig {
     #[cfg(glx_backend)]
     Glx(*const ffi::c_void),
 
-    /// TODO
+    /// WGL pixel format index.
     #[cfg(wgl_backend)]
-    Wgl(*const ffi::c_void),
+    Wgl(i32),
 
     /// TODO
     #[cfg(cgl_backend)]

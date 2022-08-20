@@ -5,12 +5,14 @@ use std::sync::Arc;
 use glutin_glx_sys::glx;
 use glutin_glx_sys::glx::types::GLXFBConfig;
 use glutin_glx_sys::glx_extra;
+use raw_window_handle::RawWindowHandle;
 
 use crate::config::{
     Api, AsRawConfig, ColorBufferType, ConfigExtraSupport, ConfigSurfaceTypes, ConfigTemplate,
     GlConfig, RawConfig,
 };
 use crate::display::GetGlDisplay;
+use crate::error::{ErrorKind, Result};
 use crate::platform::x11::{X11GlConfigExt, X11VisualInfo, XLIB};
 use crate::private::Sealed;
 
@@ -20,11 +22,11 @@ impl Display {
     pub(crate) fn find_configs(
         &self,
         template: ConfigTemplate,
-    ) -> Option<Box<dyn Iterator<Item = Config> + '_>> {
+    ) -> Result<Box<dyn Iterator<Item = Config> + '_>> {
         let mut config_attributes = Vec::<c_int>::new();
 
         if !template.api.contains(Api::OPENGL) {
-            return None;
+            return Err(ErrorKind::NotSupported.into());
         }
 
         // Add color buffer type.
@@ -68,7 +70,7 @@ impl Display {
         if template.float_pixels && extra.contains(ConfigExtraSupport::FLOAT_PIXELS) {
             config_attributes.push(glx_extra::RGBA_FLOAT_BIT_ARB as c_int);
         } else if template.float_pixels {
-            return None;
+            return Err(ErrorKind::NotSupported.into());
         } else {
             config_attributes.push(glx::RGBA_BIT as c_int);
         }
@@ -88,6 +90,12 @@ impl Display {
         // Add stencil.
         config_attributes.push(glx::STENCIL_SIZE as c_int);
         config_attributes.push(template.stencil_size as c_int);
+
+        // Add visual if was provided.
+        if let Some(RawWindowHandle::Xlib(window)) = template.native_window {
+            config_attributes.push(glx::VISUAL_ID as c_int);
+            config_attributes.push(window.visual_id as c_int);
+        }
 
         // Add surface type.
         config_attributes.push(glx::DRAWABLE_TYPE as c_int);
@@ -139,7 +147,7 @@ impl Display {
             );
 
             if raw_configs.is_null() {
-                return None;
+                return Err(ErrorKind::BadConfig.into());
             }
 
             let configs = slice::from_raw_parts_mut(raw_configs, num_configs as usize).to_vec();
@@ -161,7 +169,7 @@ impl Display {
                     }
                 });
 
-            Some(Box::new(iter))
+            Ok(Box::new(iter))
         }
     }
 }

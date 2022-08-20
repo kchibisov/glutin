@@ -117,7 +117,7 @@ impl GlDisplay for Display {
     fn find_configs(
         &self,
         template: ConfigTemplate,
-    ) -> Option<Box<dyn Iterator<Item = Self::Config> + '_>> {
+    ) -> Result<Box<dyn Iterator<Item = Self::Config> + '_>> {
         Self::find_configs(self, template)
     }
 
@@ -168,7 +168,7 @@ fn get_extensions(glx: &Glx, display: GlxDisplay) -> HashSet<&'static str> {
         }
 
         if let Ok(extensions) = CStr::from_ptr(extensions).to_str() {
-            extensions.split(' ').collect::<HashSet<&'static str>>()
+            extensions.split(' ').collect::<HashSet<_>>()
         } else {
             HashSet::new()
         }

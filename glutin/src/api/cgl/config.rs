@@ -8,6 +8,7 @@ use crate::config::{
     Api, AsRawConfig, ColorBufferType, ConfigSurfaceTypes, ConfigTemplate, GlConfig, RawConfig,
 };
 use crate::display::GetGlDisplay;
+use crate::error::{ErrorKind, Result};
 use crate::private::Sealed;
 
 use super::display::Display;
@@ -16,7 +17,7 @@ impl Display {
     pub(crate) fn find_configs(
         &self,
         template: ConfigTemplate,
-    ) -> Option<Box<dyn Iterator<Item = Config> + '_>> {
+    ) -> Result<Box<dyn Iterator<Item = Config> + '_>> {
         let mut attrs = Vec::<u32>::with_capacity(32);
 
         // We use minimum to follow behavior of other platforms here.
@@ -29,7 +30,7 @@ impl Display {
                 // We can't specify particular color, so we provide the sum.
                 attrs.push((r_size + g_size + b_size) as u32);
             }
-            _ => return None,
+            _ => return Err(ErrorKind::NotSupported.into()),
         }
 
         // Alpha.
@@ -74,12 +75,12 @@ impl Display {
         unsafe {
             let raw = NSOpenGLPixelFormat::alloc(nil).initWithAttributes_(&attrs);
             if raw.is_null() {
-                return None;
+                return Err(ErrorKind::BadConfig.into());
             }
             let inner = Arc::new(ConfigInner { raw, transrarency: template.transparency });
             let config = Config { inner };
 
-            Some(Box::new(iter::once(config).into_iter()))
+            Ok(Box::new(iter::once(config).into_iter()))
         }
     }
 }

@@ -1,20 +1,248 @@
+use std::iter;
+use std::mem::{self, MaybeUninit};
 use std::os::raw::c_int;
 use std::sync::Arc;
+
+use glutin_wgl_sys::wgl_extra;
+use raw_window_handle::RawWindowHandle;
+use windows_sys::Win32::Graphics::Gdi::{self as gdi, HDC};
+use windows_sys::Win32::Graphics::OpenGL::{self as gl, PIXELFORMATDESCRIPTOR};
 
 use crate::config::{
     Api, AsRawConfig, ColorBufferType, ConfigSurfaceTypes, ConfigTemplate, GlConfig, RawConfig,
 };
 use crate::display::GetGlDisplay;
+use crate::error::{ErrorKind, Result};
 use crate::private::Sealed;
 
 use super::display::Display;
+
+/// The maximum amount of configs to query.
+const MAX_QUERY_CONFIGS: usize = 256;
+
+// Multisampling extension.
+const MULTI_SAMPLE_ARB: &str = "WGL_ARB_multisample";
+
+// Srgb extensions.
+const SRGB_ARB: &str = "WGL_ARB_framebuffer_sRGB";
+const SRGB_EXT: &str = "WGL_ARB_framebuffer_sRGB";
 
 impl Display {
     pub(crate) fn find_configs(
         &self,
         template: ConfigTemplate,
-    ) -> Option<Box<dyn Iterator<Item = Config> + '_>> {
-        todo!()
+    ) -> Result<Box<dyn Iterator<Item = Config> + '_>> {
+        let hwnd = match template.native_window {
+            Some(RawWindowHandle::Win32(window_handle)) => window_handle.hwnd as _,
+            _ => 0,
+        };
+        let hdc = unsafe { gdi::GetDC(hwnd) };
+
+        match self.inner.wgl_extra {
+            // Check that particular function was loaded.
+            Some(wgl_extra) if wgl_extra.ChoosePixelFormatARB.is_loaded() => {
+                self.find_configs_arb(template, hdc)
+            }
+            _ => self.find_normal_configs(template, hdc),
+        }
+    }
+
+    fn find_normal_configs(
+        &self,
+        template: ConfigTemplate,
+        hdc: HDC,
+    ) -> Result<Box<dyn Iterator<Item = Config> + '_>> {
+        let (r_size, g_size, b_size) = match template.color_buffer_type {
+            ColorBufferType::Rgb { r_size, g_size, b_size } => (r_size, g_size, b_size),
+            _ => return Err(ErrorKind::NotSupported.into()),
+        };
+
+        let mut dw_flags = gl::PFD_SUPPORT_OPENGL;
+        if !template.single_buffering {
+            dw_flags |= gl::PFD_DOUBLEBUFFER;
+        }
+
+        if template.config_surface_types.contains(ConfigSurfaceTypes::WINDOW) {
+            dw_flags |= gl::PFD_DRAW_TO_WINDOW;
+        }
+
+        if template.config_surface_types.contains(ConfigSurfaceTypes::PIXMAP) {
+            dw_flags |= gl::PFD_DRAW_TO_BITMAP;
+        }
+
+        dw_flags |= match template.stereoscopy {
+            Some(true) => gl::PFD_STEREO,
+            Some(false) => 0,
+            None => gl::PFD_STEREO_DONTCARE,
+        };
+
+        let pixel_format_descriptor = PIXELFORMATDESCRIPTOR {
+            nSize: mem::size_of::<PIXELFORMATDESCRIPTOR>() as _,
+            // Should be one according to the docs.
+            nVersion: 1,
+            dwFlags: dw_flags,
+            iPixelType: gl::PFD_TYPE_RGBA,
+            cColorBits: r_size + g_size + b_size,
+            cRedBits: r_size,
+            cRedShift: 0,
+            cGreenBits: g_size,
+            cGreenShift: 0,
+            cBlueBits: b_size,
+            cBlueShift: 0,
+            cAlphaBits: template.alpha_size,
+            cAlphaShift: 0,
+            cAccumBits: 0,
+            cAccumRedBits: 0,
+            cAccumGreenBits: 0,
+            cAccumBlueBits: 0,
+            cAccumAlphaBits: 0,
+            cDepthBits: template.depth_size,
+            cStencilBits: template.stencil_size,
+            cAuxBuffers: 0,
+            iLayerType: gl::PFD_MAIN_PLANE,
+            bReserved: 0,
+            dwLayerMask: 0,
+            dwVisibleMask: 0,
+            dwDamageMask: 0,
+        };
+
+        unsafe {
+            let pixel_format_index = gl::ChoosePixelFormat(hdc, &pixel_format_descriptor);
+            if pixel_format_index == 0 {
+                return Err(ErrorKind::BadConfig.into());
+            }
+
+            let mut descriptor = MaybeUninit::<PIXELFORMATDESCRIPTOR>::uninit();
+            if gl::DescribePixelFormat(
+                hdc,
+                pixel_format_index as _,
+                mem::size_of::<PIXELFORMATDESCRIPTOR>() as _,
+                descriptor.as_mut_ptr(),
+            ) == 0
+            {
+                return Err(ErrorKind::BadConfig.into());
+            };
+
+            let descriptor = descriptor.assume_init();
+
+            if descriptor.iPixelType != gl::PFD_TYPE_RGBA {
+                return Err(ErrorKind::BadConfig.into());
+            }
+
+            let inner = Arc::new(ConfigInner {
+                display: self.clone(),
+                hdc,
+                pixel_format_index,
+                descriptor: Some(descriptor),
+            });
+            let config = Config { inner };
+
+            Ok(Box::new(iter::once(config)))
+        }
+    }
+
+    fn find_configs_arb(
+        &self,
+        template: ConfigTemplate,
+        hdc: HDC,
+    ) -> Result<Box<dyn Iterator<Item = Config> + '_>> {
+        let wgl_extra = self.inner.wgl_extra.unwrap();
+        let mut attrs = Vec::<c_int>::with_capacity(32);
+
+        match template.color_buffer_type {
+            ColorBufferType::Rgb { r_size, g_size, b_size } => {
+                attrs.push(wgl_extra::RED_BITS_ARB as c_int);
+                attrs.push(r_size as c_int);
+                attrs.push(wgl_extra::GREEN_BITS_ARB as c_int);
+                attrs.push(g_size as c_int);
+                attrs.push(wgl_extra::BLUE_BITS_ARB as c_int);
+                attrs.push(b_size as c_int);
+            }
+            _ => return Err(ErrorKind::NotSupported.into()),
+        }
+
+        attrs.push(wgl_extra::ALPHA_BITS_ARB as c_int);
+        attrs.push(template.alpha_size as c_int);
+
+        attrs.push(wgl_extra::DEPTH_BITS_ARB as c_int);
+        attrs.push(template.depth_size as c_int);
+
+        attrs.push(wgl_extra::STENCIL_BITS_ARB as c_int);
+        attrs.push(template.stencil_size as c_int);
+
+        attrs.push(wgl_extra::SUPPORT_OPENGL_ARB as c_int);
+        attrs.push(1);
+
+        attrs.push(wgl_extra::DOUBLE_BUFFER_ARB as c_int);
+        attrs.push(!template.single_buffering as c_int);
+
+        let pixel_type = if self.inner.client_extensions.contains("WGL_ARB_pixel_format_float")
+            && template.float_pixels
+        {
+            wgl_extra::TYPE_RGBA_FLOAT_ARB
+        } else {
+            wgl_extra::TYPE_RGBA_ARB
+        };
+
+        if self.inner.client_extensions.contains(MULTI_SAMPLE_ARB) {
+            attrs.push(wgl_extra::SAMPLE_BUFFERS_ARB as c_int);
+            attrs.push((template.sample_buffers != 0) as c_int);
+            attrs.push(wgl_extra::SAMPLES_ARB as c_int);
+            attrs.push(template.sample_buffers as c_int);
+        }
+
+        attrs.push(wgl_extra::PIXEL_TYPE_ARB as c_int);
+        attrs.push(pixel_type as c_int);
+
+        if let Some(stereo) = template.stereoscopy {
+            attrs.push(wgl_extra::STEREO_ARB as c_int);
+            attrs.push(stereo as c_int)
+        }
+
+        if template.config_surface_types.contains(ConfigSurfaceTypes::WINDOW) {
+            attrs.push(wgl_extra::DRAW_TO_WINDOW_ARB as c_int);
+            attrs.push(1);
+        }
+
+        if template.config_surface_types.contains(ConfigSurfaceTypes::PIXMAP) {
+            attrs.push(wgl_extra::DRAW_TO_WINDOW_ARB as c_int);
+            attrs.push(1);
+        }
+
+        if template.transparency {
+            attrs.push(wgl_extra::TRANSPARENT_ARB as c_int);
+            attrs.push(1);
+        }
+
+        // Terminate attrs with zero.
+        attrs.push(0);
+
+        unsafe {
+            let mut num_configs = 0;
+            let mut configs = Vec::<c_int>::with_capacity(MAX_QUERY_CONFIGS);
+            if wgl_extra.ChoosePixelFormatARB(
+                hdc as *const _,
+                attrs.as_ptr().cast(),
+                std::ptr::null(),
+                configs.capacity() as _,
+                configs.as_mut_ptr().cast(),
+                &mut num_configs,
+            ) == 0
+            {
+                return Err(ErrorKind::BadAttribute.into());
+            }
+            configs.set_len(num_configs as _);
+
+            Ok(Box::new(configs.into_iter().map(move |pixel_format_index| {
+                let inner = Arc::new(ConfigInner {
+                    display: self.clone(),
+                    hdc,
+                    pixel_format_index,
+                    descriptor: None,
+                });
+                Config { inner }
+            })))
+        }
     }
 }
 
@@ -23,67 +251,213 @@ pub struct Config {
     pub(crate) inner: Arc<ConfigInner>,
 }
 
-pub(crate) struct ConfigInner {}
+pub(crate) struct ConfigInner {
+    pub(crate) display: Display,
+    pub(crate) hdc: HDC,
+    pub(crate) pixel_format_index: i32,
+    pub(crate) descriptor: Option<PIXELFORMATDESCRIPTOR>,
+}
 
 impl Sealed for Config {}
 
 impl GlConfig for Config {
     fn color_buffer_type(&self) -> ColorBufferType {
-        todo!()
+        let (r_size, g_size, b_size) = match self.inner.descriptor.as_ref() {
+            Some(descriptor) => (descriptor.cRedBits, descriptor.cGreenBits, descriptor.cBlueBits),
+            _ => {
+                let r_size = self.raw_attribute(wgl_extra::RED_BITS_ARB as c_int) as u8;
+                let g_size = self.raw_attribute(wgl_extra::GREEN_BITS_ARB as c_int) as u8;
+                let b_size = self.raw_attribute(wgl_extra::BLUE_BITS_ARB as c_int) as u8;
+                (r_size, g_size, b_size)
+            }
+        };
+
+        ColorBufferType::Rgb { r_size, g_size, b_size }
     }
 
     fn float_pixels(&self) -> bool {
-        todo!()
+        self.raw_attribute(wgl_extra::PIXEL_TYPE_ARB as c_int)
+            == wgl_extra::TYPE_RGBA_FLOAT_ARB as c_int
     }
 
     fn native_visual(&self) -> u32 {
-        todo!()
+        0
     }
 
     fn alpha_size(&self) -> u8 {
-        todo!()
+        match self.inner.descriptor.as_ref() {
+            Some(descriptor) => descriptor.cAlphaBits,
+            _ => self.raw_attribute(wgl_extra::ALPHA_BITS_ARB as c_int) as _,
+        }
     }
 
     fn srgb_capable(&self) -> bool {
-        todo!()
+        if self.inner.display.inner.client_extensions.contains(SRGB_EXT) {
+            self.raw_attribute(wgl_extra::FRAMEBUFFER_SRGB_CAPABLE_EXT as c_int) != 0
+        } else if self.inner.display.inner.client_extensions.contains(SRGB_ARB) {
+            self.raw_attribute(wgl_extra::FRAMEBUFFER_SRGB_CAPABLE_ARB as c_int) != 0
+        } else {
+            false
+        }
     }
 
     fn depth_size(&self) -> u8 {
-        todo!()
+        match self.inner.descriptor.as_ref() {
+            Some(descriptor) => descriptor.cDepthBits,
+            _ => self.raw_attribute(wgl_extra::DEPTH_BITS_ARB as c_int) as _,
+        }
     }
 
     fn stencil_size(&self) -> u8 {
-        todo!()
+        match self.inner.descriptor.as_ref() {
+            Some(descriptor) => descriptor.cStencilBits,
+            _ => self.raw_attribute(wgl_extra::STENCIL_BITS_ARB as c_int) as _,
+        }
     }
 
     fn sample_buffers(&self) -> u8 {
-        todo!()
+        if self.inner.display.inner.client_extensions.contains(MULTI_SAMPLE_ARB) {
+            self.raw_attribute(wgl_extra::SAMPLES_ARB as c_int) as _
+        } else {
+            0
+        }
     }
 
     fn config_surface_types(&self) -> ConfigSurfaceTypes {
-        todo!()
+        let mut flags = ConfigSurfaceTypes::empty();
+        match self.inner.descriptor.as_ref() {
+            Some(descriptor) => {
+                let dw_flags = descriptor.dwFlags;
+                if dw_flags & gl::PFD_DRAW_TO_WINDOW != 0 {
+                    flags |= ConfigSurfaceTypes::WINDOW;
+                }
+
+                if dw_flags & gl::PFD_DRAW_TO_BITMAP != 0 {
+                    flags |= ConfigSurfaceTypes::PIXMAP;
+                }
+            }
+            _ => {
+                if self.raw_attribute(wgl_extra::DRAW_TO_WINDOW_ARB as c_int) != 0 {
+                    flags |= ConfigSurfaceTypes::WINDOW
+                }
+                if self.raw_attribute(wgl_extra::DRAW_TO_BITMAP_ARB as c_int) != 0 {
+                    flags |= ConfigSurfaceTypes::WINDOW
+                }
+            }
+        }
+
+        flags
     }
 
     fn api(&self) -> Api {
-        todo!()
+        Api::OPENGL
+    }
+}
+
+impl Config {
+    /// Set the pixel format on the native window.
+    pub fn apply_on_native_window(&self, raw_window_handle: &RawWindowHandle) -> Result<()> {
+        unsafe {
+            let hdc = match raw_window_handle {
+                RawWindowHandle::Win32(window) => gdi::GetDC(window.hwnd as _),
+                _ => return Err(ErrorKind::BadNativeWindow.into()),
+            };
+
+            let descriptor =
+                self.inner.descriptor.as_ref().map(|desc| desc as _).unwrap_or(std::ptr::null());
+            if gl::SetPixelFormat(hdc, self.inner.pixel_format_index, descriptor) == 0 {
+                Err(ErrorKind::BadConfig.into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn raw_attribute(&self, attr: c_int) -> c_int {
+        unsafe {
+            let wgl_extra = self.inner.display.inner.wgl_extra.unwrap();
+            let mut res = 0;
+            wgl_extra.GetPixelFormatAttribivARB(
+                self.inner.hdc as *const _,
+                self.inner.pixel_format_index,
+                gl::PFD_MAIN_PLANE as _,
+                1,
+                &attr,
+                &mut res,
+            );
+            res
+        }
+    }
+}
+
+/// This function chooses a pixel format that is likely to be provided by the
+/// main video driver of the system.
+pub(crate) fn choose_dummy_pixel_format(hdc: HDC) -> Result<(i32, PIXELFORMATDESCRIPTOR)> {
+    let descriptor = PIXELFORMATDESCRIPTOR {
+        nSize: std::mem::size_of::<PIXELFORMATDESCRIPTOR>() as u16,
+        nVersion: 1,
+        dwFlags: gl::PFD_DRAW_TO_WINDOW | gl::PFD_SUPPORT_OPENGL | gl::PFD_DOUBLEBUFFER,
+        iPixelType: gl::PFD_TYPE_RGBA,
+        cColorBits: 24,
+        cRedBits: 0,
+        cRedShift: 0,
+        cGreenBits: 0,
+        cGreenShift: 0,
+        cBlueBits: 0,
+        cBlueShift: 0,
+        cAlphaBits: 8,
+        cAlphaShift: 0,
+        cAccumBits: 0,
+        cAccumRedBits: 0,
+        cAccumGreenBits: 0,
+        cAccumBlueBits: 0,
+        cAccumAlphaBits: 0,
+        cDepthBits: 24,
+        cStencilBits: 8,
+        cAuxBuffers: 0,
+        iLayerType: gl::PFD_MAIN_PLANE,
+        bReserved: 0,
+        dwLayerMask: 0,
+        dwVisibleMask: 0,
+        dwDamageMask: 0,
+    };
+
+    let pixel_format_index = unsafe { gl::ChoosePixelFormat(hdc, &descriptor) };
+    if pixel_format_index == 0 {
+        return Err(ErrorKind::BadAttribute.into());
+    }
+
+    unsafe {
+        let mut descriptor = MaybeUninit::<PIXELFORMATDESCRIPTOR>::uninit();
+        if gl::DescribePixelFormat(
+            hdc,
+            pixel_format_index as _,
+            mem::size_of::<PIXELFORMATDESCRIPTOR>() as _,
+            descriptor.as_mut_ptr(),
+        ) == 0
+        {
+            return Err(ErrorKind::BadConfig.into());
+        };
+
+        let descriptor = descriptor.assume_init();
+
+        if descriptor.iPixelType != gl::PFD_TYPE_RGBA {
+            return Err(ErrorKind::BadConfig.into());
+        }
+
+        Ok((pixel_format_index, descriptor))
     }
 }
 
 impl GetGlDisplay for Config {
     type Target = Display;
     fn display(&self) -> Self::Target {
-        todo!()
-    }
-}
-
-impl Config {
-    fn raw_attribute(&self, attr: c_int) -> c_int {
-        todo!()
+        self.inner.display.clone()
     }
 }
 
 impl AsRawConfig for Config {
     fn raw_config(&self) -> RawConfig {
-        todo!()
+        RawConfig::Wgl(self.inner.pixel_format_index)
     }
 }

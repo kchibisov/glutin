@@ -13,9 +13,9 @@ edition = "2021"
 
 [features]
 default = ["egl", "glx", "x11", "wayland", "wgl"]
-egl = ["glutin_egl_sys", "glutin_gles2_sys"]
+egl = ["glutin_egl_sys"]
 glx = ["x11", "x11-dl", "glutin_glx_sys"]
-wgl = []
+wgl = ["glutin_wgl_sys", "windows-sys"]
 x11 = ["x11-dl"]
 wayland = ["wayland-sys"]
 
@@ -25,20 +25,29 @@ raw-window-handle = "0.5.0"
 bitflags = "1.3.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-glutin_egl_sys = { version = "0.1.6", path = "../glutin_egl_sys", optional = true }
-glutin_gles2_sys = { version = "0.1.5", path = "../glutin_gles2_sys", optional = true }
 libloading = "0.7.3"
+glutin_egl_sys = { version = "0.1.6", path = "../glutin_egl_sys", optional = true }
+glutin_wgl_sys = { version = "0.1.5", path = "../glutin_wgl_sys", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies.windows-sys]
+version = "0.36"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_OpenGL",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+]
+optional = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 glutin_egl_sys = { version = "0.1.6", path = "../glutin_egl_sys" }
-glutin_gles2_sys = { version = "0.1.5", path = "../glutin_gles2_sys" }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "dragonfly", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 wayland-sys = { version = "0.30.0-beta.8", default-features = false, features = ["egl", "client"], optional = true }
 x11-dl = { version = "2.20.0", optional = true }
 glutin_glx_sys = { version = "0.1.8", path = "../glutin_glx_sys", optional = true }
 glutin_egl_sys = { version = "0.1.6", path = "../glutin_egl_sys", optional = true }
-glutin_gles2_sys = { version = "0.1.5", path = "../glutin_gles2_sys", optional = true }
 libloading = "0.7.3"
 
 [target.'cfg(any(target_os = "macos"))'.dependencies]

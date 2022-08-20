@@ -2,11 +2,17 @@ use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::os::raw::{c_int, c_uint};
 
+use glutin_wgl_sys::wgl;
+use glutin_wgl_sys::wgl::types::HGLRC;
 use raw_window_handle::RawWindowHandle;
+use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Graphics::Gdi::{self as gdi, HDC};
+use windows_sys::Win32::Graphics::OpenGL::{self as gl, PIXELFORMATDESCRIPTOR};
 
 use crate::config::GetGlConfig;
 use crate::display::GetGlDisplay;
-use crate::error::Result;
+use crate::error::{ErrorKind, Result};
+use crate::prelude::*;
 use crate::private::Sealed;
 use crate::surface::{
     AsRawSurface, GlSurface, PbufferSurface, PixmapSurface, RawSurface, SurfaceAttributes,
@@ -14,6 +20,7 @@ use crate::surface::{
 };
 
 use super::config::Config;
+use super::context::PossiblyCurrentContext;
 use super::display::Display;
 
 impl Display {
@@ -38,13 +45,25 @@ impl Display {
         config: &Config,
         surface_attributes: &SurfaceAttributes<WindowSurface>,
     ) -> Result<Surface<WindowSurface>> {
-        todo!()
+        let hwnd = match surface_attributes.raw_window_handle.as_ref().unwrap() {
+            handle @ RawWindowHandle::Win32(window_handle) => {
+                let _ = config.apply_on_native_window(handle);
+                window_handle.hwnd as HWND
+            }
+            _ => return Err(ErrorKind::NotSupported.into()),
+        };
+
+        let surface =
+            Surface { display: self.clone(), config: config.clone(), hwnd, _ty: PhantomData };
+
+        Ok(surface)
     }
 }
 
 pub struct Surface<T: SurfaceTypeTrait> {
     display: Display,
     config: Config,
+    pub(crate) hwnd: HWND,
     _ty: PhantomData<T>,
 }
 
@@ -52,47 +71,53 @@ impl<T: SurfaceTypeTrait> Sealed for Surface<T> {}
 
 impl<T: SurfaceTypeTrait> AsRawSurface for Surface<T> {
     fn raw_surface(&self) -> RawSurface {
-        todo!()
+        RawSurface::Wgl(self.hwnd as _)
     }
 }
 
 impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
     type SurfaceType = T;
+    type Context = PossiblyCurrentContext;
 
     fn buffer_age(&self) -> u32 {
-        todo!()
+        0
     }
 
     fn width(&self) -> Option<u32> {
-        todo!()
+        None
     }
 
     fn height(&self) -> Option<u32> {
-        todo!()
+        None
     }
 
     fn is_single_buffered(&self) -> bool {
-        todo!()
+        // TODO
+        false
     }
 
-    fn swap_buffers(&self) -> Result<()> {
-        todo!()
+    fn swap_buffers(&self, _context: &Self::Context) -> Result<()> {
+        unsafe {
+            let hdc = gdi::GetDC(self.hwnd);
+            gl::SwapBuffers(hdc);
+            Ok(())
+        }
     }
 
-    fn is_current(&self) -> bool {
-        todo!()
+    fn is_current(&self, context: &Self::Context) -> bool {
+        context.is_current()
     }
 
-    fn is_current_draw(&self) -> bool {
-        todo!()
+    fn is_current_draw(&self, context: &Self::Context) -> bool {
+        context.is_current()
     }
 
-    fn is_current_read(&self) -> bool {
-        todo!()
+    fn is_current_read(&self, context: &Self::Context) -> bool {
+        context.is_current()
     }
 
-    fn resize(&self, _width: NonZeroU32, _height: NonZeroU32) {
-        // This isn't supported with GLXDrawable.
+    fn resize(&self, _context: &Self::Context, _width: NonZeroU32, _height: NonZeroU32) {
+        // This isn't supported with WGL.
     }
 }
 
@@ -118,6 +143,6 @@ impl<T: SurfaceTypeTrait> Surface<T> {
 
 impl<T: SurfaceTypeTrait> Drop for Surface<T> {
     fn drop(&mut self) {
-        todo!()
+        // This line intentionally left blank.
     }
 }

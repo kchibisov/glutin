@@ -3,11 +3,16 @@ use std::ffi::{self, CStr};
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use crate::context::{AsRawContext, ContextAttributes, RawContext};
+use glutin_wgl_sys::wgl;
+use glutin_wgl_sys::wgl::types::HGLRC;
+use raw_window_handle::RawWindowHandle;
+use windows_sys::Win32::Graphics::Gdi::{self as gdi};
+use windows_sys::Win32::System::LibraryLoader as dll_loader;
 
 use crate::config::GetGlConfig;
+use crate::context::{AsRawContext, ContextAttributes, RawContext};
 use crate::display::GetGlDisplay;
-use crate::error::Result;
+use crate::error::{ErrorKind, Result};
 use crate::prelude::*;
 use crate::private::Sealed;
 use crate::surface::SurfaceTypeTrait;
@@ -22,7 +27,22 @@ impl Display {
         config: &Config,
         context_attributes: &ContextAttributes,
     ) -> Result<NotCurrentContext> {
-        todo!()
+        unsafe {
+            let hdc = match context_attributes.raw_window_handle.as_ref() {
+                handle @ Some(RawWindowHandle::Win32(window)) => {
+                    let _ = config.apply_on_native_window(handle.unwrap());
+                    gdi::GetDC(window.hwnd as _)
+                }
+                _ => config.inner.hdc,
+            };
+
+            let raw = wgl::CreateContext(hdc as *const _);
+            if raw.is_null() {
+                return Err(ErrorKind::BadConfig.into());
+            }
+            let inner = ContextInner { display: self.clone(), config: config.clone(), raw };
+            Ok(NotCurrentContext { inner, _nosync: PhantomData })
+        }
     }
 }
 
@@ -79,7 +99,7 @@ impl<T: SurfaceTypeTrait> PossiblyCurrentContextGlSurfaceAccessor<T> for Possibl
     type Surface = Surface<T>;
 
     fn make_current(&self, surface: &Self::Surface) -> Result<()> {
-        self.inner.make_current_draw_read(surface, surface)
+        self.inner.make_current(surface)
     }
 
     fn make_current_draw_read(
@@ -95,22 +115,34 @@ impl PossiblyCurrentGlContext for PossiblyCurrentContext {
     type NotCurrentContext = NotCurrentContext;
 
     fn make_not_current(self) -> Result<Self::NotCurrentContext> {
-        self.inner.make_not_current()?;
-        Ok(NotCurrentContext::new(self.inner))
-    }
+        unsafe {
+            // TODO error
+            if self.is_current() {
+                let hdc = wgl::GetCurrentDC();
+                wgl::MakeCurrent(hdc, std::ptr::null());
+            }
 
-    fn update_after_resize(&self) {
-        self.inner.update_after_resize()
+            Ok(NotCurrentContext::new(self.inner))
+        }
     }
 
     fn set_swap_interval(&self, interval: u16) {}
 
     fn is_current(&self) -> bool {
-        todo!()
+        unsafe { wgl::GetCurrentContext() == self.inner.raw }
     }
 
     fn get_proc_address(&self, addr: &CStr) -> *const ffi::c_void {
-        todo!()
+        unsafe {
+            let addr = addr.as_ptr();
+            let fn_ptr = wgl::GetProcAddress(addr);
+            if !fn_ptr.is_null() {
+                fn_ptr.cast()
+            } else {
+                dll_loader::GetProcAddress(self.inner.display.inner.lib_opengl32, addr.cast())
+                    .map_or(std::ptr::null(), |fn_ptr| fn_ptr as *const _)
+            }
+        }
     }
 }
 
@@ -127,7 +159,7 @@ impl<T: SurfaceTypeTrait> NotCurrentGlContextSurfaceAccessor<T> for NotCurrentCo
     type PossiblyCurrentContext = PossiblyCurrentContext;
 
     fn make_current(self, surface: &Self::Surface) -> Result<Self::PossiblyCurrentContext> {
-        self.inner.make_current_draw_read(surface, surface)?;
+        self.inner.make_current(surface)?;
         Ok(PossiblyCurrentContext { inner: self.inner, _nosendsync: PhantomData })
     }
 
@@ -143,41 +175,44 @@ impl<T: SurfaceTypeTrait> NotCurrentGlContextSurfaceAccessor<T> for NotCurrentCo
 
 impl AsRawContext for PossiblyCurrentContext {
     fn raw_context(&self) -> RawContext {
-        todo!()
+        RawContext::Wgl(self.inner.raw)
     }
 }
 
 impl AsRawContext for NotCurrentContext {
     fn raw_context(&self) -> RawContext {
-        todo!()
+        RawContext::Wgl(self.inner.raw)
     }
 }
 
 struct ContextInner {
     display: Display,
     config: Config,
+    raw: HGLRC,
 }
 
 impl ContextInner {
     fn make_current_draw_read<T: SurfaceTypeTrait>(
         &self,
-        surface_draw: &Surface<T>,
-        surface_read: &Surface<T>,
+        _surface_draw: &Surface<T>,
+        _surface_read: &Surface<T>,
     ) -> Result<()> {
-        todo!()
+        Err(ErrorKind::NotSupported.into())
     }
 
-    fn make_not_current(&self) -> Result<()> {
-        todo!()
-    }
-
-    fn update_after_resize(&self) {
-        // This line is intentionally left blank.
+    fn make_current<T: SurfaceTypeTrait>(&self, surface: &Surface<T>) -> Result<()> {
+        unsafe {
+            let hdc = gdi::GetDC(surface.hwnd);
+            wgl::MakeCurrent(hdc as _, self.raw.cast());
+            Ok(())
+        }
     }
 }
 
 impl Drop for ContextInner {
     fn drop(&mut self) {
-        todo!()
+        unsafe {
+            wgl::DeleteContext(self.raw);
+        }
     }
 }

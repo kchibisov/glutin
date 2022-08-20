@@ -20,6 +20,7 @@ pub trait X11GlConfigExt {
 ///
 /// This must be used when building X11 window, so it'll be compatible with the underlying Api.
 pub struct X11VisualInfo {
+    // FIXME don't store display.
     display: *mut Display,
     raw: *const XVisualInfo,
 }

@@ -36,7 +36,7 @@ impl GlDisplay for Display {
     fn find_configs(
         &self,
         template: ConfigTemplate,
-    ) -> Option<Box<dyn Iterator<Item = Self::Config> + '_>> {
+    ) -> Result<Box<dyn Iterator<Item = Self::Config> + '_>> {
         Self::find_configs(self, template)
     }
 

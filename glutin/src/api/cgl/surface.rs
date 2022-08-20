@@ -14,8 +14,8 @@ use crate::surface::{
 };
 
 use super::config::Config;
-use super::display::Display;
 use super::context::PossiblyCurrentContext;
+use super::display::Display;
 
 impl Display {
     pub(crate) unsafe fn create_pixmap_surface(

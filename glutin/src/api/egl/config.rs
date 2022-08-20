@@ -11,6 +11,7 @@ use crate::config::{
     RawConfig,
 };
 use crate::display::GetGlDisplay;
+use crate::error::{ErrorKind, Result};
 use crate::prelude::*;
 use crate::private::Sealed;
 
@@ -23,7 +24,7 @@ impl Display {
     pub(crate) fn find_configs(
         &self,
         template: ConfigTemplate,
-    ) -> Option<Box<dyn Iterator<Item = Config> + '_>> {
+    ) -> Result<Box<dyn Iterator<Item = Config> + '_>> {
         let mut config_attributes = Vec::<EGLint>::new();
 
         // Add color buffer type.
@@ -65,7 +66,7 @@ impl Display {
             config_attributes.push(egl::COLOR_COMPONENT_TYPE_EXT as EGLint);
             config_attributes.push(egl::COLOR_COMPONENT_TYPE_FLOAT_EXT as EGLint);
         } else if template.float_pixels {
-            return None;
+            return Err(ErrorKind::NotSupported.into());
         }
 
         // Add alpha.
@@ -155,7 +156,7 @@ impl Display {
             );
 
             if result == egl::FALSE {
-                return None;
+                return Err(ErrorKind::BadConfig.into());
             }
 
             found_configs.set_len(configs_number as usize);
@@ -186,7 +187,7 @@ impl Display {
                 true
             });
 
-        Some(Box::new(configs))
+        Ok(Box::new(configs))
     }
 
     fn configs_number(&self) -> usize {

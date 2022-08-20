@@ -37,13 +37,11 @@ type EglGetProcAddress = unsafe extern "C" fn(*const ffi::c_void) -> *const ffi:
 static EGL_GET_PROC_ADDRESS: OnceCell<libloading_os::Symbol<EglGetProcAddress>> = OnceCell::new();
 
 impl SymLoading for egl::Egl {
-    fn load_with(lib: &Library) -> Self {
+    unsafe fn load_with(lib: &Library) -> Self {
         let loader = move |sym_name: &'static str| -> *const ffi::c_void {
             let sym_name = CString::new(sym_name.as_bytes()).unwrap();
-            unsafe {
-                if let Ok(sym) = lib.get(sym_name.as_bytes_with_nul()) {
-                    return *sym;
-                }
+            if let Ok(sym) = lib.get(sym_name.as_bytes_with_nul()) {
+                return *sym;
             }
 
             let egl_proc_address = EGL_GET_PROC_ADDRESS.get_or_init(|| unsafe {
@@ -55,9 +53,7 @@ impl SymLoading for egl::Egl {
             // The symbol was not available in the library, so ask eglGetProcAddress for it. Note
             // that eglGetProcAddress was only able to look up extension functions prior to EGL
             // 1.5, hence this two-part dance.
-            unsafe {
-                (egl_proc_address)(sym_name.as_bytes_with_nul().as_ptr() as *const ffi::c_void)
-            }
+            (egl_proc_address)(sym_name.as_bytes_with_nul().as_ptr() as *const ffi::c_void)
         };
 
         Self::load_with(loader)

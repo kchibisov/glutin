@@ -59,6 +59,8 @@ pub struct DisplayPicker {
     pub(crate) api_preference: DisplayApiPreference,
     #[cfg(glx_backend)]
     pub(crate) glx_error_registrator: Option<XlibErrorHookRegistrator>,
+    #[cfg(wgl_backend)]
+    pub(crate) window_handle: Option<raw_window_handle::RawWindowHandle>,
 }
 
 impl Default for DisplayPicker {
@@ -67,7 +69,7 @@ impl Default for DisplayPicker {
         Self { api_preference: DisplayApiPreference::Egl, glx_error_registrator: None }
     }
 
-    #[cfg(all(egl_backend, not(glx_backend)))]
+    #[cfg(all(egl_backend, not(glx_backend), not(wgl_backend)))]
     fn default() -> Self {
         Self { api_preference: DisplayApiPreference::Egl }
     }
@@ -79,7 +81,12 @@ impl Default for DisplayPicker {
 
     #[cfg(all(wgl_backend, not(egl_backend)))]
     fn default() -> Self {
-        Self { api_preference: DisplayApiPreference::Wgl }
+        Self { api_preference: DisplayApiPreference::Wgl, window_handle: None }
+    }
+
+    #[cfg(all(wgl_backend, egl_backend))]
+    fn default() -> Self {
+        Self { api_preference: DisplayApiPreference::WglThenEgl, window_handle: None }
     }
 
     #[cfg(cgl_backend)]
@@ -96,6 +103,18 @@ impl DisplayPicker {
     /// The preference of the underlying system Api.
     pub fn with_api_preference(mut self, api_preference: DisplayApiPreference) -> Self {
         self.api_preference = api_preference;
+        self
+    }
+
+    /// Create WGL display which will be the most suitable to operate with the given window.
+    ///
+    /// When the window isn't provided the support for extensions and pixel formats may be lacking.
+    #[cfg(wgl_backend)]
+    pub fn with_most_compatible_for_window(
+        mut self,
+        window_handle: raw_window_handle::RawWindowHandle,
+    ) -> Self {
+        self.window_handle = Some(window_handle);
         self
     }
 
@@ -123,7 +142,7 @@ pub trait GlDisplay: Sealed {
     fn find_configs(
         &self,
         template: ConfigTemplate,
-    ) -> Option<Box<dyn Iterator<Item = Self::Config> + '_>>;
+    ) -> Result<Box<dyn Iterator<Item = Self::Config> + '_>>;
 
     /// Create the graphics platform context.
     fn create_context(
@@ -192,23 +211,23 @@ impl GlDisplay for Display {
     fn find_configs(
         &self,
         template: ConfigTemplate,
-    ) -> Option<Box<dyn Iterator<Item = Self::Config> + '_>> {
+    ) -> Result<Box<dyn Iterator<Item = Self::Config> + '_>> {
         match self {
             #[cfg(egl_backend)]
             Self::Egl(display) => {
-                Some(Box::new(display.find_configs(template)?.into_iter().map(Config::Egl)))
+                Ok(Box::new(display.find_configs(template)?.into_iter().map(Config::Egl)))
             }
             #[cfg(glx_backend)]
             Self::Glx(display) => {
-                Some(Box::new(display.find_configs(template)?.into_iter().map(Config::Glx)))
+                Ok(Box::new(display.find_configs(template)?.into_iter().map(Config::Glx)))
             }
             #[cfg(wgl_backend)]
             Self::Wgl(display) => {
-                Some(Box::new(display.find_configs(template)?.into_iter().map(Config::Wgl)))
+                Ok(Box::new(display.find_configs(template)?.into_iter().map(Config::Wgl)))
             }
             #[cfg(cgl_backend)]
             Self::Cgl(display) => {
-                Some(Box::new(display.find_configs(template)?.into_iter().map(Config::Cgl)))
+                Ok(Box::new(display.find_configs(template)?.into_iter().map(Config::Cgl)))
             }
         }
     }
@@ -338,7 +357,9 @@ impl Display {
             #[cfg(glx_backend)]
             DisplayApiPreference::Glx => Ok(Self::Glx(GlxDisplay::from_raw(display, registrator)?)),
             #[cfg(wgl_backend)]
-            DisplayApiPreference::Wgl => Ok(Self::Wgl(WglDisplay::from_raw(display)?)),
+            DisplayApiPreference::Wgl => {
+                Ok(Self::Wgl(WglDisplay::from_raw(display, picker.window_handle)?))
+            }
             #[cfg(cgl_backend)]
             DisplayApiPreference::Cgl => Ok(Self::Cgl(CglDisplay::from_raw(display)?)),
 
@@ -364,12 +385,12 @@ impl Display {
                 if let Ok(display) = EglDisplay::from_raw(display) {
                     Ok(Self::Egl(display))
                 } else {
-                    Ok(Self::Wgl(WglDisplay::from_raw(display)?))
+                    Ok(Self::Wgl(WglDisplay::from_raw(display, picker.window_handle)?))
                 }
             }
             #[cfg(all(egl_backend, wgl_backend))]
             DisplayApiPreference::WglThenEgl => {
-                if let Ok(display) = WglDisplay::from_raw(display) {
+                if let Ok(display) = WglDisplay::from_raw(display, picker.window_handle) {
                     Ok(Self::Wgl(display))
                 } else {
                     Ok(Self::Egl(EglDisplay::from_raw(display)?))
@@ -397,9 +418,8 @@ pub enum RawDisplay {
     #[cfg(glx_backend)]
     Glx(*const std::ffi::c_void),
 
-    /// TODO.
     #[cfg(wgl_backend)]
-    Wgl(*const std::ffi::c_void),
+    Wgl,
 
     #[cfg(cgl_backend)]
     Cgl,
