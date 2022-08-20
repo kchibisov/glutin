@@ -14,6 +14,7 @@ use crate::surface::{
 };
 
 use super::config::Config;
+use super::context::PossiblyCurrentContext;
 use super::display::Display;
 
 impl Display {
@@ -58,6 +59,7 @@ impl<T: SurfaceTypeTrait> AsRawSurface for Surface<T> {
 
 impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
     type SurfaceType = T;
+    type Context = PossiblyCurrentContext;
 
     fn buffer_age(&self) -> u32 {
         todo!()
@@ -75,23 +77,23 @@ impl<T: SurfaceTypeTrait> GlSurface<T> for Surface<T> {
         todo!()
     }
 
-    fn swap_buffers(&self) -> Result<()> {
+    fn swap_buffers(&self, _context: &Self::Context) -> Result<()> {
         todo!()
     }
 
-    fn is_current(&self) -> bool {
+    fn is_current(&self, _context: &Self::Context) -> bool {
         todo!()
     }
 
-    fn is_current_draw(&self) -> bool {
+    fn is_current_draw(&self, _context: &Self::Context) -> bool {
         todo!()
     }
 
-    fn is_current_read(&self) -> bool {
+    fn is_current_read(&self, _context: &Self::Context) -> bool {
         todo!()
     }
 
-    fn resize(&self, _width: NonZeroU32, _height: NonZeroU32) {
+    fn resize(&self, _context: &Self::Context, _width: NonZeroU32, _height: NonZeroU32) {
         // This isn't supported with GLXDrawable.
     }
 }

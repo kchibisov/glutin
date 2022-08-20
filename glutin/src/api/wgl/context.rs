@@ -99,10 +99,6 @@ impl PossiblyCurrentGlContext for PossiblyCurrentContext {
         Ok(NotCurrentContext::new(self.inner))
     }
 
-    fn update_after_resize(&self) {
-        self.inner.update_after_resize()
-    }
-
     fn set_swap_interval(&self, interval: u16) {}
 
     fn is_current(&self) -> bool {
@@ -169,10 +165,6 @@ impl ContextInner {
 
     fn make_not_current(&self) -> Result<()> {
         todo!()
-    }
-
-    fn update_after_resize(&self) {
-        // This line is intentionally left blank.
     }
 }
 
