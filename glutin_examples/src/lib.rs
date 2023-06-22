@@ -53,7 +53,7 @@ pub fn main(event_loop: winit::event_loop::EventLoop<()>) {
                     let transparency_check = config.supports_transparency().unwrap_or(false)
                         & !accum.supports_transparency().unwrap_or(false);
 
-                    if transparency_check || config.num_samples() > accum.num_samples() {
+                    if transparency_check || config.num_samples() < accum.num_samples() {
                         config
                     } else {
                         accum
@@ -129,9 +129,9 @@ pub fn main(event_loop: winit::event_loop::EventLoop<()>) {
                 // WGL.
                 renderer.get_or_insert_with(|| Renderer::new(&gl_display));
 
-                // Try setting vsync.
-                if let Err(res) = gl_surface
-                    .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
+                // Disable vsync, we'll use winit's throttling instead to have a non-blocking
+                // loop aligned with the OS redraws..
+                if let Err(res) = gl_surface.set_swap_interval(&gl_context, SwapInterval::DontWait)
                 {
                     eprintln!("Error setting vsync: {res:?}");
                 }
@@ -157,7 +157,7 @@ pub fn main(event_loop: winit::event_loop::EventLoop<()>) {
                         // Notable platforms here are Wayland and macOS, other don't require it
                         // and the function is no-op, but it's wise to resize it for portability
                         // reasons.
-                        if let Some((gl_context, gl_surface, _)) = &state {
+                        if let Some((gl_context, gl_surface, window)) = &state {
                             gl_surface.resize(
                                 gl_context,
                                 NonZeroU32::new(size.width).unwrap(),
@@ -165,6 +165,8 @@ pub fn main(event_loop: winit::event_loop::EventLoop<()>) {
                             );
                             let renderer = renderer.as_ref().unwrap();
                             renderer.resize(size.width as i32, size.height as i32);
+
+                            window.request_redraw();
                         }
                     }
                 },
@@ -173,15 +175,22 @@ pub fn main(event_loop: winit::event_loop::EventLoop<()>) {
                 },
                 _ => (),
             },
-            Event::RedrawEventsCleared => {
+            Event::RedrawRequested(_) => {
                 if let Some((gl_context, gl_surface, window)) = &state {
                     let renderer = renderer.as_ref().unwrap();
                     renderer.draw();
-                    window.request_redraw();
+
+                    // XXX Notify right before we do swap buffers, but after all the drawing,
+                    // so winit could do a better scheduling.
+                    window.on_present_notify();
 
                     gl_surface.swap_buffers(gl_context).unwrap();
+
+                    // Request a redraw to continue contiguos drawing.
+                    window.request_redraw();
                 }
             },
+            Event::RedrawEventsCleared => (),
             _ => (),
         }
     })
